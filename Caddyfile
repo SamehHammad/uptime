@@ -1,0 +1,12 @@
+# Automatic HTTPS for $DOMAIN: /mcp goes to the MCP server, everything else to Uptime Kuma.
+{$DOMAIN} {
+	encode gzip
+
+	handle /mcp* {
+		reverse_proxy mcp:3005
+	}
+
+	handle {
+		reverse_proxy uptime-kuma:3001
+	}
+}

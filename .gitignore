@@ -1,0 +1,12 @@
+# Secrets
+.env
+**/.env
+
+# Runtime data (Kuma database, Caddy certificates) and logs
+data/
+logs/
+
+# Local Windows checkout of upstream Uptime Kuma (the server uses the official Docker image)
+uptime-kuma/
+
+node_modules/

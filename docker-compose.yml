@@ -1,0 +1,47 @@
+name: uptime
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.5.11
+    restart: unless-stopped
+    environment:
+      # Skip the "choose database" page on first run
+      UPTIME_KUMA_DB_TYPE: sqlite
+      TZ: ${TZ:-Africa/Cairo}
+    volumes:
+      - ./data/uptime-kuma:/app/data
+    ports:
+      # install.sh sets 127.0.0.1:3001 when a DOMAIN is used (Caddy serves HTTPS instead)
+      - "${KUMA_PORT_BIND:-3001}:3001"
+
+  mcp:
+    build: ./uptime-kuma-mcp
+    restart: unless-stopped
+    depends_on:
+      - uptime-kuma
+    env_file: .env
+    environment:
+      KUMA_URL: http://uptime-kuma:3001
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "3005"
+      # First run: create the Kuma admin from .env and configure email alerts if SMTP_* is set
+      AUTO_SETUP: "true"
+    ports:
+      - "${MCP_PORT_BIND:-3005}:3005"
+
+  # Only started with: docker compose --profile https up -d   (install.sh does this when DOMAIN is set)
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - uptime-kuma
+      - mcp
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
