@@ -17,9 +17,11 @@ const MONITOR_DEFAULTS = {
     location: "world",
     ipFamily: null,
     interval: 60,
-    retryInterval: 60,
+    // Anti-flapping: a site is only declared DOWN (and alerted) after the first
+    // failure plus 3 failed retries 30s apart (~1.5 min). Short blips send nothing.
+    retryInterval: 30,
     resendInterval: 0,
-    maxretries: 0,
+    maxretries: 3,
     retryOnlyOnStatusCodeFailure: false,
     notificationIDList: {},
     ignoreTls: false,
@@ -296,7 +298,7 @@ export function registerTools(server, kuma) {
             set("method", a.method);
             set("keyword", a.keyword);
             set("interval", a.interval);
-            set("retryInterval", a.retry_interval ?? a.interval);
+            set("retryInterval", a.retry_interval);
             set("maxretries", a.max_retries);
             set("timeout", a.timeout ?? (a.interval ? Math.min(48, a.interval * 0.8) : 48));
             set("accepted_statuscodes", a.accepted_status_codes);
@@ -327,6 +329,53 @@ export function registerTools(server, kuma) {
             }
             const res = await kuma.call("editMonitor", updated);
             return { ok: true, monitor_id: res.monitorID ?? monitor_id, msg: res.msg };
+        }
+    );
+
+    tool(
+        "set_alert_policy",
+        "Control WHEN alerts fire, for all monitors (default) or selected ones. Anti-flapping: `retries` failed re-checks, " +
+            "`retry_interval` seconds apart, must ALL fail before a monitor is declared DOWN and an alert is sent; if the site " +
+            "recovers during the retries nothing is sent (UP->PENDING->UP is silent). DOWN after ≈ retries × retry_interval seconds. " +
+            "`resend_every` = re-send the DOWN alert every N checks while still down (0 = never). " +
+            "Example: retries 3, retry_interval 30 → alert only after ~1.5 min of continuous failure.",
+        {
+            retries: z.number().int().min(0).max(20).optional(),
+            retry_interval: z.number().int().min(20).optional().describe("Seconds between retries (min 20)"),
+            resend_every: z.number().int().min(0).optional().describe("Resend DOWN alert every N checks while down; 0 = never"),
+            monitor_ids: z.array(z.number().int()).optional().describe("Default: every monitor"),
+        },
+        async ({ retries, retry_interval, resend_every, monitor_ids }) => {
+            await kuma.ready();
+            const ids = monitor_ids ?? Object.values(kuma.cache.monitorList).filter((m) => m.type !== "group").map((m) => m.id);
+            const results = [];
+            for (const id of ids) {
+                try {
+                    const current = normalizeMonitorForEdit(await getMonitorRaw(id));
+                    const updated = { ...current, id };
+                    if (retries !== undefined) {
+                        updated.maxretries = retries;
+                    }
+                    if (retry_interval !== undefined) {
+                        updated.retryInterval = retry_interval;
+                    }
+                    if (resend_every !== undefined) {
+                        updated.resendInterval = resend_every;
+                    }
+                    await kuma.call("editMonitor", updated);
+                    results.push({
+                        id,
+                        name: current.name,
+                        retries: updated.maxretries,
+                        retry_interval: updated.retryInterval,
+                        resend_every: updated.resendInterval,
+                        down_alert_after_seconds: updated.maxretries * updated.retryInterval,
+                    });
+                } catch (e) {
+                    results.push({ id, error: e.message });
+                }
+            }
+            return results;
         }
     );
 

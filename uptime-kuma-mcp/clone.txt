@@ -1,0 +1,4 @@
+git clone https://github.com/SamehHammad/uptime.git
+cd uptime
+cp .env.example .env && nano .env    # اختياري: الدومين وبيانات الإيميل
+sudo ./install.sh
